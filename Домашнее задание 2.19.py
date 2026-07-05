@@ -127,8 +127,7 @@ import matplotlib as plt
 from sklearn.metrics import ConfusionMatrixDisplay
 
 ConfusionMatrixDisplay.from_estimator(
-    model1, X_tst, y_tst, display_labels=["Легитимная", "Мошенническая"]
-)
+    model1, X_tst, y_tst, display_labels=["Легитимная", "Мошенническая"])
 
 plt.show()  # 14
 
