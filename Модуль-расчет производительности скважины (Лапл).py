@@ -1,47 +1,19 @@
-import numpy as np
+from dataclasses import dataclass
 import matplotlib.pyplot as plt
+import numpy as np
 from scipy.special import factorial, iv, kv
 
 
-# -------------------- Исходные данные --------------------
+Q_const = 30 / 86400
+p_w = 20e6
+r_w = 0.05
+t_day = 86400
 
-# В текущей постановке Q_const применяется отдельно к каждому пласту.
-# Поэтому каждый пласт дает 30 м³/сут, а суммарный дебит равен 60 м³/сут.
-Q_const = 30 / 86400  # м³/с
-
-p_e1 = 30e6  # Па, начальное давление пласта 1
-p_e2 = 25e6  # Па, начальное давление пласта 2
-p_w = 20e6   # Па, забойное давление — только опорная линия на графике
-
-r_w = 0.05   # м, радиус скважины
-r_e1 = 250   # м, внешняя граница пласта 1
-r_e2 = 300   # м, внешняя граница пласта 2
-
-# Параметры первого пласта
-h_1 = 8
-k_1 = 10e-15
-mu_1 = 3e-3
-phi_1 = 0.15
-c_total_1 = 3e-10
-kappa_1 = k_1 / (phi_1 * mu_1 * c_total_1)
-
-# Параметры второго пласта
-h_2 = 10
-k_2 = 10e-15
-mu_2 = 2e-3
-phi_2 = 0.15
-c_total_2 = 3e-10
-kappa_2 = k_2 / (phi_2 * mu_2 * c_total_2)
-
-
-# -------------------- Обратное преобразование Лапласа --------------------
 
 def inv_laplace(func, t, n=12):
-    """Обратное преобразование Лапласа методом Стефеста."""
     if t <= 0:
         raise ValueError("Время t должно быть больше нуля.")
 
-    # Для метода Стефеста число коэффициентов должно быть четным.
     if n % 2 != 0:
         n += 1
 
@@ -83,19 +55,10 @@ def inv_laplace(func, t, n=12):
     return result * ln2_t
 
 
-# -------------------- Давление в пространстве Лапласа --------------------
-
 def make_pressure_laplace(r, r_e, kappa, mu, permeability, thickness, rate):
-    """
-    Возвращает функцию давления в пространстве Лапласа
-    для заданного радиуса и параметров пласта.
-    """
     def pressure_laplace(s):
         alpha = np.sqrt(s / kappa)
 
-        # Матрица граничных условий:
-        # 1. На внешней границе dp/dr = 0.
-        # 2. На скважине задан постоянный дебит.
         matrix = np.array(
             [
                 [iv(1, r_e * alpha), -kv(1, r_e * alpha)],
@@ -134,100 +97,11 @@ def make_pressure_laplace(r, r_e, kappa, mu, permeability, thickness, rate):
     return pressure_laplace
 
 
-# -------------------- Дебит в пространстве Лапласа --------------------
-
 def make_rate_laplace(rate):
-    """
-    Для постоянного дебита q(t)=rate:
-    преобразование Лапласа равно rate/s.
-    """
     def rate_laplace(s):
         return rate / s
 
     return rate_laplace
-
-
-# -------------------- Расчет данных --------------------
-
-t_day = 86400
-days = 20
-n_pressure_curves = 10
-
-pressure_times = np.linspace(t_day, days * t_day, n_pressure_curves)
-
-r_array1 = np.linspace(r_w, r_e1, 300)
-r_array2 = np.linspace(r_w, r_e2, 300)
-
-pressure_curves_1 = []
-pressure_curves_2 = []
-
-for t in pressure_times:
-    pressures_1 = np.array(
-        [
-            p_e1
-            + inv_laplace(
-                make_pressure_laplace(
-                    r=r,
-                    r_e=r_e1,
-                    kappa=kappa_1,
-                    mu=mu_1,
-                    permeability=k_1,
-                    thickness=h_1,
-                    rate=Q_const,
-                ),
-                t,
-                n=12,
-            )
-            for r in r_array1
-        ]
-    )
-
-    pressures_2 = np.array(
-        [
-            p_e2
-            + inv_laplace(
-                make_pressure_laplace(
-                    r=r,
-                    r_e=r_e2,
-                    kappa=kappa_2,
-                    mu=mu_2,
-                    permeability=k_2,
-                    thickness=h_2,
-                    rate=Q_const,
-                ),
-                t,
-                n=12,
-            )
-            for r in r_array2
-        ]
-    )
-
-    # Для удобства давления сразу переводятся в МПа.
-    pressure_curves_1.append(pressures_1 / 1e6)
-    pressure_curves_2.append(pressures_2 / 1e6)
-
-
-# Расчет дебитов
-rate_times = np.linspace(0.9 * t_day, days * t_day, 50)
-
-rate_laplace_1 = make_rate_laplace(Q_const)
-rate_laplace_2 = make_rate_laplace(Q_const)
-
-q1_rates = np.array(
-    [
-        max(inv_laplace(rate_laplace_1, t, n=12) * t_day, 0.0)
-        for t in rate_times
-    ]
-)
-
-q2_rates = np.array(
-    [
-        max(inv_laplace(rate_laplace_2, t, n=12) * t_day, 0.0)
-        for t in rate_times
-    ]
-)
-
-total_rates = q1_rates + q2_rates
 
 
 def check_steady_state(
@@ -237,10 +111,6 @@ def check_steady_state(
     threshold=0.02,
     consecutive_points=3,
 ):
-    """
-    Считает режим установившимся, если относительное изменение
-    меньше threshold несколько интервалов подряд.
-    """
     rates = np.asarray(rates, dtype=float)
     times = np.asarray(times, dtype=float)
 
@@ -269,164 +139,296 @@ def check_steady_state(
     return None
 
 
-steady_time_1 = check_steady_state(
-    q1_rates,
-    rate_times,
-    "пласта 1",
-)
+@dataclass(frozen=True)
+class Layer:
+    name: str
+    steady_state_name: str
+    initial_pressure: float
+    outer_radius: float
+    thickness: float
+    permeability: float
+    viscosity: float
+    porosity: float
+    total_compressibility: float
 
-steady_time_2 = check_steady_state(
-    q2_rates,
-    rate_times,
-    "пласта 2",
-)
-
-
-# -------------------- Построение всех графиков --------------------
-
-figure = plt.figure(figsize=(16, 10), constrained_layout=True)
-grid = figure.add_gridspec(2, 2)
-
-ax_pressure_1 = figure.add_subplot(grid[0, 0])
-ax_pressure_2 = figure.add_subplot(grid[0, 1])
-ax_rates = figure.add_subplot(grid[1, :])
+    @property
+    def kappa(self):
+        return self.permeability / (
+            self.porosity * self.viscosity * self.total_compressibility
+        )
 
 
-# График давления пласта 1
-for t, pressures in zip(pressure_times, pressure_curves_1):
-    ax_pressure_1.plot(
-        r_array1,
-        pressures,
-        label=f"t = {t / t_day:.1f} сут",
+@dataclass
+class SimulationResult:
+    pressure_times: np.ndarray
+    rate_times: np.ndarray
+    radii: list
+    pressure_curves: list
+    layer_rates: list
+    total_rates: np.ndarray
+    steady_times: list
+
+
+class ReservoirSimulation:
+    def __init__(self, layers, rate, days=20, n_pressure_curves=10):
+        self.layers = layers
+        self.rate = rate
+        self.days = days
+        self.n_pressure_curves = n_pressure_curves
+
+    def calculate_pressure_curves(self, layer, pressure_times, radii):
+        curves = []
+
+        for t in pressure_times:
+            pressures = np.array(
+                [
+                    layer.initial_pressure
+                    + inv_laplace(
+                        make_pressure_laplace(
+                            r=r,
+                            r_e=layer.outer_radius,
+                            kappa=layer.kappa,
+                            mu=layer.viscosity,
+                            permeability=layer.permeability,
+                            thickness=layer.thickness,
+                            rate=self.rate,
+                        ),
+                        t,
+                        n=12,
+                    )
+                    for r in radii
+                ]
+            )
+            curves.append(pressures / 1e6)
+
+        return curves
+
+    def calculate_layer_rates(self, rate_times):
+        layer_rates = []
+
+        for _ in self.layers:
+            rate_laplace = make_rate_laplace(self.rate)
+            rates = np.array(
+                [
+                    max(inv_laplace(rate_laplace, t, n=12) * t_day, 0.0)
+                    for t in rate_times
+                ]
+            )
+            layer_rates.append(rates)
+
+        return layer_rates
+
+    def run(self):
+        pressure_times = np.linspace(
+            t_day,
+            self.days * t_day,
+            self.n_pressure_curves,
+        )
+        radii = [
+            np.linspace(r_w, layer.outer_radius, 300)
+            for layer in self.layers
+        ]
+        pressure_curves = [
+            self.calculate_pressure_curves(layer, pressure_times, layer_radii)
+            for layer, layer_radii in zip(self.layers, radii)
+        ]
+
+        rate_times = np.linspace(0.9 * t_day, self.days * t_day, 50)
+        layer_rates = self.calculate_layer_rates(rate_times)
+        total_rates = np.sum(layer_rates, axis=0)
+        steady_times = [
+            check_steady_state(rates, rate_times, layer.steady_state_name)
+            for layer, rates in zip(self.layers, layer_rates)
+        ]
+
+        return SimulationResult(
+            pressure_times=pressure_times,
+            rate_times=rate_times,
+            radii=radii,
+            pressure_curves=pressure_curves,
+            layer_rates=layer_rates,
+            total_rates=total_rates,
+            steady_times=steady_times,
+        )
+
+
+class ResultPlotter:
+    def __init__(self, layers, days):
+        self.layers = layers
+        self.days = days
+
+    def plot_pressure(self, axis, layer, radii, pressure_times, curves):
+        for t, pressures in zip(pressure_times, curves):
+            axis.plot(
+                radii,
+                pressures,
+                label=f"t = {t / t_day:.1f} сут",
+            )
+
+        axis.axhline(
+            layer.initial_pressure / 1e6,
+            color="black",
+            linestyle="--",
+            alpha=0.5,
+            label=(
+                f"Начальное давление = "
+                f"{layer.initial_pressure / 1e6:.0f} МПа"
+            ),
+        )
+        axis.axhline(
+            p_w / 1e6,
+            color="red",
+            linestyle="--",
+            alpha=0.5,
+            label=f"Забойное давление = {p_w / 1e6:.0f} МПа",
+        )
+        axis.axvline(
+            r_w,
+            color="green",
+            linestyle=":",
+            alpha=0.5,
+            label="Скважина",
+        )
+        axis.axvline(
+            layer.outer_radius,
+            color="blue",
+            linestyle=":",
+            alpha=0.5,
+            label="Внешняя граница",
+        )
+        axis.set_title(f"{layer.name}: распределение давления")
+        axis.set_xlabel("Радиус, м")
+        axis.set_ylabel("Давление, МПа")
+        axis.grid(True)
+        axis.legend(loc="best", fontsize=7)
+
+    def plot_rates(self, axis, result):
+        axis.plot(
+            result.rate_times / t_day,
+            result.total_rates,
+            "k-",
+            linewidth=3,
+            label="Суммарный дебит",
+        )
+        axis.plot(
+            result.rate_times / t_day,
+            result.layer_rates[0],
+            "b-",
+            linewidth=1.5,
+            alpha=0.7,
+            label="Дебит пласта 1",
+        )
+        axis.plot(
+            result.rate_times / t_day,
+            result.layer_rates[1],
+            "r--",
+            linewidth=1.5,
+            alpha=0.7,
+            label="Дебит пласта 2",
+        )
+        axis.set_title("Динамика дебитов")
+        axis.set_xlabel("Время, сут")
+        axis.set_ylabel("Дебит, м³/сут")
+        axis.grid(which="major", linewidth=0.8, alpha=0.5)
+        axis.grid(which="minor", linestyle=":", linewidth=0.5, alpha=0.3)
+        axis.minorticks_on()
+        axis.legend(loc="best")
+
+    def show(self, result):
+        figure = plt.figure(figsize=(16, 10), constrained_layout=True)
+        grid = figure.add_gridspec(2, 2)
+        pressure_axes = [
+            figure.add_subplot(grid[0, 0]),
+            figure.add_subplot(grid[0, 1]),
+        ]
+        rates_axis = figure.add_subplot(grid[1, :])
+
+        for axis, layer, radii, curves in zip(
+            pressure_axes,
+            self.layers,
+            result.radii,
+            result.pressure_curves,
+        ):
+            self.plot_pressure(
+                axis,
+                layer,
+                radii,
+                result.pressure_times,
+                curves,
+            )
+
+        self.plot_rates(rates_axis, result)
+        plt.show()
+
+
+class StatisticsPrinter:
+    def __init__(self, days):
+        self.days = days
+
+    def print(self, result):
+        print("\n=== СТАТИСТИКА ДЕБИТОВ ===")
+        print(
+            f"Начальный суммарный дебит: "
+            f"{result.total_rates[0]:.1f} м³/сут"
+        )
+        print(
+            f"  в том числе пласт 1: "
+            f"{result.layer_rates[0][0]:.1f} м³/сут"
+        )
+        print(
+            f"  в том числе пласт 2: "
+            f"{result.layer_rates[1][0]:.1f} м³/сут"
+        )
+        print(
+            f"\nСуммарный дебит через {self.days} сут: "
+            f"{result.total_rates[-1]:.1f} м³/сут"
+        )
+        print(
+            f"  в том числе пласт 1: "
+            f"{result.layer_rates[0][-1]:.1f} м³/сут"
+        )
+        print(
+            f"  в том числе пласт 2: "
+            f"{result.layer_rates[1][-1]:.1f} м³/сут"
+        )
+
+
+def main():
+    layers = [
+        Layer(
+            name="Пласт 1",
+            steady_state_name="пласта 1",
+            initial_pressure=30e6,
+            outer_radius=250,
+            thickness=8,
+            permeability=10e-15,
+            viscosity=3e-3,
+            porosity=0.15,
+            total_compressibility=3e-10,
+        ),
+        Layer(
+            name="Пласт 2",
+            steady_state_name="пласта 2",
+            initial_pressure=25e6,
+            outer_radius=300,
+            thickness=10,
+            permeability=10e-15,
+            viscosity=2e-3,
+            porosity=0.15,
+            total_compressibility=3e-10,
+        ),
+    ]
+
+    simulation = ReservoirSimulation(
+        layers=layers,
+        rate=Q_const,
+        days=20,
+        n_pressure_curves=10,
     )
-
-ax_pressure_1.axhline(
-    p_e1 / 1e6,
-    color="black",
-    linestyle="--",
-    alpha=0.5,
-    label=f"Начальное давление = {p_e1 / 1e6:.0f} МПа",
-)
-ax_pressure_1.axhline(
-    p_w / 1e6,
-    color="red",
-    linestyle="--",
-    alpha=0.5,
-    label=f"Забойное давление = {p_w / 1e6:.0f} МПа",
-)
-ax_pressure_1.axvline(
-    r_w,
-    color="green",
-    linestyle=":",
-    alpha=0.5,
-    label="Скважина",
-)
-ax_pressure_1.axvline(
-    r_e1,
-    color="blue",
-    linestyle=":",
-    alpha=0.5,
-    label="Внешняя граница",
-)
-
-ax_pressure_1.set_title("Пласт 1: распределение давления")
-ax_pressure_1.set_xlabel("Радиус, м")
-ax_pressure_1.set_ylabel("Давление, МПа")
-ax_pressure_1.grid(True)
-ax_pressure_1.legend(loc="best", fontsize=7)
+    result = simulation.run()
+    StatisticsPrinter(simulation.days).print(result)
+    ResultPlotter(layers, simulation.days).show(result)
 
 
-# График давления пласта 2
-for t, pressures in zip(pressure_times, pressure_curves_2):
-    ax_pressure_2.plot(
-        r_array2,
-        pressures,
-        label=f"t = {t / t_day:.1f} сут",
-    )
-
-ax_pressure_2.axhline(
-    p_e2 / 1e6,
-    color="black",
-    linestyle="--",
-    alpha=0.5,
-    label=f"Начальное давление = {p_e2 / 1e6:.0f} МПа",
-)
-ax_pressure_2.axhline(
-    p_w / 1e6,
-    color="red",
-    linestyle="--",
-    alpha=0.5,
-    label=f"Забойное давление = {p_w / 1e6:.0f} МПа",
-)
-ax_pressure_2.axvline(
-    r_w,
-    color="green",
-    linestyle=":",
-    alpha=0.5,
-    label="Скважина",
-)
-ax_pressure_2.axvline(
-    r_e2,
-    color="blue",
-    linestyle=":",
-    alpha=0.5,
-    label="Внешняя граница",
-)
-
-ax_pressure_2.set_title("Пласт 2: распределение давления")
-ax_pressure_2.set_xlabel("Радиус, м")
-ax_pressure_2.set_ylabel("Давление, МПа")
-ax_pressure_2.grid(True)
-ax_pressure_2.legend(loc="best", fontsize=7)
-
-
-# График дебитов
-ax_rates.plot(
-    rate_times / t_day,
-    total_rates,
-    "k-",
-    linewidth=3,
-    label="Суммарный дебит",
-)
-ax_rates.plot(
-    rate_times / t_day,
-    q1_rates,
-    "b-",
-    linewidth=1.5,
-    alpha=0.7,
-    label="Дебит пласта 1",
-)
-ax_rates.plot(
-    rate_times / t_day,
-    q2_rates,
-    "r--",
-    linewidth=1.5,
-    alpha=0.7,
-    label="Дебит пласта 2",
-)
-
-ax_rates.set_title("Динамика дебитов")
-ax_rates.set_xlabel("Время, сут")
-ax_rates.set_ylabel("Дебит, м³/сут")
-ax_rates.grid(which="major", linewidth=0.8, alpha=0.5)
-ax_rates.grid(which="minor", linestyle=":", linewidth=0.5, alpha=0.3)
-ax_rates.minorticks_on()
-ax_rates.legend(loc="best")
-
-
-# -------------------- Статистика --------------------
-
-print("\n=== СТАТИСТИКА ДЕБИТОВ ===")
-print(f"Начальный суммарный дебит: {total_rates[0]:.1f} м³/сут")
-print(f"  в том числе пласт 1: {q1_rates[0]:.1f} м³/сут")
-print(f"  в том числе пласт 2: {q2_rates[0]:.1f} м³/сут")
-
-print(
-    f"\nСуммарный дебит через {days} сут: "
-    f"{total_rates[-1]:.1f} м³/сут"
-)
-print(f"  в том числе пласт 1: {q1_rates[-1]:.1f} м³/сут")
-print(f"  в том числе пласт 2: {q2_rates[-1]:.1f} м³/сут")
-
-
-plt.show()
+if __name__ == "__main__":
+    main()
